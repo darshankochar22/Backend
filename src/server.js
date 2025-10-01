@@ -18,6 +18,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5003; // Different port from FastAPI
 
+// Trust proxy for Vercel deployment
+app.set("trust proxy", 1);
+
 // Security middleware
 app.use(helmet());
 
@@ -68,8 +71,24 @@ app.use(
 // MongoDB connection
 const connectDB = async () => {
   try {
-    const mongoUrl =
-      process.env.MONGO_URL || "mongodb://localhost:27017/hexagon";
+    const mongoUrl = process.env.MONGO_URL;
+
+    if (!mongoUrl) {
+      console.error("❌ MONGO_URL environment variable is not set");
+      process.exit(1);
+    }
+
+    // Validate MongoDB URL format
+    if (
+      !mongoUrl.startsWith("mongodb://") &&
+      !mongoUrl.startsWith("mongodb+srv://")
+    ) {
+      console.error("❌ Invalid MongoDB URL format:", mongoUrl);
+      console.error("❌ URL must start with 'mongodb://' or 'mongodb+srv://'");
+      process.exit(1);
+    }
+
+    console.log("🔗 Connecting to MongoDB...");
     await mongoose.connect(mongoUrl);
     console.log("✅ MongoDB connected successfully");
   } catch (error) {
