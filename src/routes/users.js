@@ -45,6 +45,8 @@ router.get("/me", authenticateToken, async (req, res) => {
       created_at: user.createdAt,
       last_login: user.lastLogin,
       profile: user.profile,
+      studentProfile: user.studentProfile || {},
+      hrProfile: user.hrProfile || {},
     });
   } catch (error) {
     console.error("Get profile error:", error);

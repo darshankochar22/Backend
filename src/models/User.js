@@ -68,6 +68,15 @@ const userSchema = new mongoose.Schema(
         file_data: String, // base64 encoded
       },
     },
+    // Separate profile containers for future divergence
+    studentProfile: {
+      type: Object,
+      default: {},
+    },
+    hrProfile: {
+      type: Object,
+      default: {},
+    },
     isActive: {
       type: Boolean,
       default: true,
