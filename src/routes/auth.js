@@ -421,6 +421,16 @@ router.get("/google/callback", async (req, res) => {
       if (!user.profile.avatar && picture) {
         user.profile.avatar = picture;
       }
+      // Optionally update role from state for existing Google users
+      try {
+        if (state) {
+          const parsed = JSON.parse(state);
+          const requestedRole = (parsed.role || "student").toString().toLowerCase();
+          if (["student", "hr"].includes(requestedRole) && user.role !== requestedRole) {
+            user.role = requestedRole;
+          }
+        }
+      } catch (_) {}
       await user.save();
     }
 
