@@ -3,6 +3,7 @@ import { body, query, validationResult } from "express-validator";
 import { authenticateToken, optionalAuth } from "../middleware/auth.js";
 import { authorizeRoles } from "../middleware/auth.js";
 import Job from "../models/Job.js";
+import User from "../models/User.js";
 
 const router = express.Router();
 
@@ -186,6 +187,41 @@ router.get("/", optionalAuth, async (req, res) => {
   }
 });
 
+// HR: list applicants for a job they posted
+router.get(
+  "/:id/applicants",
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
+    try {
+      const job = await Job.findById(req.params.id)
+        .populate("applications.user", "username email profile.full_name role")
+        .lean();
+
+      if (!job || job.isArchived) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      if (job.postedBy.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ error: "Not authorized to view applicants" });
+      }
+
+      const applicants = (job.applications || []).map((app) => ({
+        id: app._id,
+        user: app.user,
+        status: app.status,
+        appliedAt: app.appliedAt,
+        coverLetter: app.coverLetter,
+      }));
+
+      res.json({ applicants });
+    } catch (error) {
+      console.error("List applicants error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
 // Get a single job by ID
 router.get("/:id", optionalAuth, async (req, res) => {
   try {
@@ -222,8 +258,28 @@ router.get("/:id", optionalAuth, async (req, res) => {
       requirements: job.requirements || [],
       views: job.views,
       applicationDeadline: job.applicationDeadline,
-      applications: job.applications,
     };
+
+    // Include applications ONLY for HR owner viewing their own job
+    const isOwnerHr =
+      req.user &&
+      req.user.role === "hr" &&
+      job.postedBy &&
+      job.postedBy._id &&
+      req.user._id.toString() === job.postedBy._id.toString();
+
+    if (isOwnerHr) {
+      const fullJob = await Job.findById(req.params.id)
+        .populate("applications.user", "username email profile.full_name")
+        .lean();
+      formattedJob.applications = (fullJob.applications || []).map((app) => ({
+        id: app._id,
+        user: app.user,
+        status: app.status,
+        appliedAt: app.appliedAt,
+        coverLetter: app.coverLetter,
+      }));
+    }
 
     res.json(formattedJob);
   } catch (error) {
