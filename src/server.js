@@ -11,6 +11,7 @@ import MongoStore from "connect-mongo";
 import authRoutes from "./routes/auth.js";
 import userRoutes from "./routes/users.js";
 import todoRoutes from "./routes/todos.js";
+import jobRoutes from "./routes/jobs.js";
 
 // Load environment variables
 dotenv.config();
@@ -101,6 +102,7 @@ const connectDB = async () => {
 app.use("/auth", authRoutes);
 app.use("/users", userRoutes);
 app.use("/todos", todoRoutes);
+app.use("/jobs", jobRoutes);
 
 // Health check endpoint
 app.get("/", (req, res) => {
