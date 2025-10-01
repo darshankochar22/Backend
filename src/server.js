@@ -32,10 +32,11 @@ app.use(limiter);
 app.use(
   cors({
     origin: [
-      "http://localhost:5173", 
+      "http://localhost:5173",
       "http://localhost:3000",
       "https://hexagon-eran.vercel.app",
-      "https://hexagon.vercel.app"
+      "https://hexagon-steel.vercel.app", // Your actual deployed frontend
+      "https://hexagon.vercel.app",
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
