@@ -98,6 +98,14 @@ const connectDB = async () => {
   }
 };
 
+// Ensure DB is connected in serverless environments BEFORE routes
+app.use(async (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    await connectDB().catch(next);
+  }
+  next();
+});
+
 // Routes
 app.use("/auth", authRoutes);
 app.use("/users", userRoutes);
@@ -128,13 +136,7 @@ app.use("*", (req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
-// Ensure DB is connected in serverless environments too
-app.use(async (req, res, next) => {
-  if (mongoose.connection.readyState !== 1) {
-    await connectDB().catch(next);
-  }
-  next();
-});
+// (moved DB ensure middleware above routes)
 
 // Start server only when not running on Vercel serverless
 const startServer = async () => {
