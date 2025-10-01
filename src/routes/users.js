@@ -242,10 +242,26 @@ router.get("/download-resume", authenticateToken, async (req, res) => {
     // Convert base64 back to buffer
     const fileBuffer = Buffer.from(resume.file_data, "base64");
 
+    // Compute cache validators
+    const lastModified = resume.uploaded_at
+      ? new Date(resume.uploaded_at)
+      : new Date();
+    const lastModifiedStr = lastModified.toUTCString();
+    const etag = `${fileBuffer.length}-${lastModified.getTime()}`;
+
     res.set({
       "Content-Type": resume.content_type,
-      "Content-Disposition": `attachment; filename="${resume.filename}"`,
+      // Use inline so browsers render instead of forcing download
+      "Content-Disposition": `inline; filename="${resume.filename}"`,
       "Content-Length": fileBuffer.length,
+      // Prevent caching so clients always fetch latest resume
+      "Cache-Control": "no-store, no-cache, must-revalidate, private",
+      Pragma: "no-cache",
+      Expires: "0",
+      // Ensure shared caches differentiate by auth
+      Vary: "Authorization",
+      "Last-Modified": lastModifiedStr,
+      ETag: etag,
     });
 
     res.send(fileBuffer);
