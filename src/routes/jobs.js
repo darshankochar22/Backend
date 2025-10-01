@@ -98,6 +98,11 @@ router.get("/", optionalAuth, async (req, res) => {
       isArchived: false,
     };
 
+    // If the requester is HR, only return their own posted jobs
+    if (req.user && req.user.role === "hr") {
+      filter.postedBy = req.user._id;
+    }
+
     // Add search filter
     if (search) {
       filter.$text = { $search: search };
