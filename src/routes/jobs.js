@@ -628,8 +628,11 @@ router.get(
         return res.status(404).json({ error: "Application not found" });
       }
       const applicant = await User.findById(application.user).select(
-        "profile.resume"
+        "profile.resume role"
       );
+      if (applicant.role !== "student") {
+        return res.status(400).json({ error: "Applicant is not a student" });
+      }
       if (!applicant || !applicant.profile || !applicant.profile.resume) {
         return res.status(404).json({ error: "Resume not found" });
       }

@@ -3,6 +3,7 @@ import { body, validationResult } from "express-validator";
 import multer from "multer";
 import path from "path";
 import { authenticateToken } from "../middleware/auth.js";
+import { authorizeRoles } from "../middleware/auth.js";
 import User from "../models/User.js";
 
 const router = express.Router();
@@ -166,6 +167,7 @@ router.post(
   "/upload-resume",
   upload.single("resume"),
   authenticateToken,
+  authorizeRoles("student"),
   async (req, res) => {
     try {
       if (!req.file) {
@@ -216,6 +218,11 @@ router.post(
 
 // Download resume
 router.get("/download-resume", authenticateToken, async (req, res) => {
+  if (req.user.role !== "student") {
+    return res
+      .status(403)
+      .json({ error: "Only students can download their resume" });
+  }
   try {
     const user = await User.findById(req.user._id).select("profile.resume");
 
@@ -246,6 +253,11 @@ router.get("/download-resume", authenticateToken, async (req, res) => {
 
 // Delete resume
 router.delete("/delete-resume", authenticateToken, async (req, res) => {
+  if (req.user.role !== "student") {
+    return res
+      .status(403)
+      .json({ error: "Only students can delete their resume" });
+  }
   try {
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
