@@ -41,6 +41,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       username: user.username,
       email: user.email,
       provider: user.provider,
+      role: user.role,
       created_at: user.createdAt,
       last_login: user.lastLogin,
       profile: user.profile,

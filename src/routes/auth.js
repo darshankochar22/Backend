@@ -30,6 +30,10 @@ const validateSignup = [
     .withMessage(
       "Password must contain at least one lowercase letter, one uppercase letter, and one number"
     ),
+  body("role")
+    .optional()
+    .isIn(["student", "hr"])
+    .withMessage("role must be 'student' or 'hr'"),
 ];
 
 const validateLogin = [
@@ -60,7 +64,7 @@ router.post("/signup", validateSignup, async (req, res) => {
       });
     }
 
-    const { username, email, password } = req.body;
+    const { username, email, password, role } = req.body;
 
     // Check if user already exists
     const existingUser = await User.findOne({
@@ -84,6 +88,7 @@ router.post("/signup", validateSignup, async (req, res) => {
       email,
       password,
       provider: "local",
+      role: role || "student",
     });
 
     await user.save();
@@ -104,6 +109,7 @@ router.post("/signup", validateSignup, async (req, res) => {
         username: user.username,
         email: user.email,
         provider: user.provider,
+        role: user.role,
         profile: user.profile,
         createdAt: user.createdAt,
       },
@@ -174,6 +180,7 @@ router.post("/login", validateLogin, async (req, res) => {
         username: user.username,
         email: user.email,
         provider: user.provider,
+        role: user.role,
         profile: user.profile,
         lastLogin: user.lastLogin,
       },

@@ -1,6 +1,7 @@
 import express from "express";
 import { body, query, validationResult } from "express-validator";
 import { authenticateToken, optionalAuth } from "../middleware/auth.js";
+import { authorizeRoles } from "../middleware/auth.js";
 import Job from "../models/Job.js";
 
 const router = express.Router();
@@ -232,7 +233,12 @@ router.get("/:id", optionalAuth, async (req, res) => {
 });
 
 // Create a new job
-router.post("/", validateJob, authenticateToken, async (req, res) => {
+router.post(
+  "/",
+  validateJob,
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
   try {
     // Check for validation errors
     const errors = validationResult(req);
@@ -278,10 +284,16 @@ router.post("/", validateJob, authenticateToken, async (req, res) => {
     console.error("Create job error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+  }
+);
 
 // Update a job
-router.put("/:id", validateJob, authenticateToken, async (req, res) => {
+router.put(
+  "/:id",
+  validateJob,
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
   try {
     // Check for validation errors
     const errors = validationResult(req);
@@ -335,10 +347,15 @@ router.put("/:id", validateJob, authenticateToken, async (req, res) => {
     console.error("Update job error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+  }
+);
 
 // Delete a job
-router.delete("/:id", authenticateToken, async (req, res) => {
+router.delete(
+  "/:id",
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
   try {
     const job = await Job.findById(req.params.id);
     if (!job) {
@@ -362,10 +379,15 @@ router.delete("/:id", authenticateToken, async (req, res) => {
     console.error("Delete job error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+  }
+);
 
 // Apply to a job
-router.post("/:id/apply", authenticateToken, async (req, res) => {
+router.post(
+  "/:id/apply",
+  authenticateToken,
+  authorizeRoles("student"),
+  async (req, res) => {
   try {
     const { coverLetter } = req.body;
 
@@ -401,10 +423,15 @@ router.post("/:id/apply", authenticateToken, async (req, res) => {
     console.error("Apply to job error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+  }
+);
 
 // Get user's posted jobs
-router.get("/my/jobs", authenticateToken, async (req, res) => {
+router.get(
+  "/my/jobs",
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
   try {
     const jobs = await Job.find({ postedBy: req.user._id, isArchived: false })
       .populate("postedBy", "username email profile.full_name")
@@ -438,10 +465,15 @@ router.get("/my/jobs", authenticateToken, async (req, res) => {
     console.error("Get my jobs error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+  }
+);
 
 // Get user's applications
-router.get("/my/applications", authenticateToken, async (req, res) => {
+router.get(
+  "/my/applications",
+  authenticateToken,
+  authorizeRoles("student"),
+  async (req, res) => {
   try {
     const jobs = await Job.find({
       "applications.user": req.user._id,
@@ -479,6 +511,7 @@ router.get("/my/applications", authenticateToken, async (req, res) => {
     console.error("Get my applications error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+  }
+);
 
 export default router;

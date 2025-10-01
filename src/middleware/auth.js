@@ -59,6 +59,23 @@ export const optionalAuth = async (req, res, next) => {
   }
 };
 
+// Role-based authorization middleware
+export const authorizeRoles = (...allowedRoles) => {
+  return (req, res, next) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      if (!allowedRoles.includes(req.user.role)) {
+        return res.status(403).json({ error: "Forbidden: insufficient role" });
+      }
+      next();
+    } catch (error) {
+      return res.status(500).json({ error: "Authorization check failed" });
+    }
+  };
+};
+
 // Generate JWT token
 export const generateToken = (userId) => {
   return jwt.sign({ userId }, JWT_SECRET, {
