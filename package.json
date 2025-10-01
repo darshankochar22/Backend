@@ -7,8 +7,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "build": "echo 'No build step required'",
+    "build": "echo 'Build completed - no build step required for Node.js'",
     "prod": "NODE_ENV=production node src/server.js",
+    "vercel-build": "echo 'Vercel build completed'",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "engines": {
