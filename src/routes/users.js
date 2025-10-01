@@ -187,10 +187,10 @@ router.post(
         file_data: fileBase64,
       };
 
-      // Update user with resume
+      // Update user with resume (store under studentProfile.resume going forward)
       const updatedUser = await User.findByIdAndUpdate(
         req.user._id,
-        { $set: { "profile.resume": resumeData } },
+        { $set: { "studentProfile.resume": resumeData } },
         { new: true }
       ).select("-password");
 
@@ -224,13 +224,17 @@ router.get("/download-resume", authenticateToken, async (req, res) => {
       .json({ error: "Only students can download their resume" });
   }
   try {
-    const user = await User.findById(req.user._id).select("profile.resume");
+    const user = await User.findById(req.user._id).select(
+      "studentProfile.resume profile.resume"
+    );
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const resume = user.profile.resume;
+    const resume =
+      (user.studentProfile && user.studentProfile.resume) ||
+      user.profile?.resume;
     if (!resume || !resume.file_data) {
       return res.status(404).json({ error: "No resume found" });
     }
@@ -261,7 +265,7 @@ router.delete("/delete-resume", authenticateToken, async (req, res) => {
   try {
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
-      { $unset: { "profile.resume": "" } },
+      { $unset: { "studentProfile.resume": "", "profile.resume": "" } },
       { new: true }
     ).select("-password");
 
