@@ -251,6 +251,15 @@ router.get("/google/url", (req, res) => {
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
 
+    // Carry role via OAuth state (validated later). Defaults to 'student'.
+    const requestedRole = (req.query.role || "student")
+      .toString()
+      .toLowerCase();
+    const role = ["student", "hr"].includes(requestedRole)
+      ? requestedRole
+      : "student";
+    authUrl.searchParams.set("state", JSON.stringify({ role }));
+
     console.log("Generated Google OAuth URL:", authUrl.toString());
     console.log("Redirect URI:", redirectUri);
 
@@ -269,7 +278,7 @@ router.get("/google/callback", async (req, res) => {
     console.log("Google OAuth callback received");
     console.log("Query params:", req.query);
 
-    const { code, error } = req.query;
+    const { code, error, state } = req.query;
 
     if (error) {
       console.error("Google OAuth error:", error);
@@ -375,11 +384,23 @@ router.get("/google/callback", async (req, res) => {
     let user = await User.findOne({ email });
     if (!user) {
       console.log("Creating new user for:", email);
+      let role = "student";
+      try {
+        if (state) {
+          const parsed = JSON.parse(state);
+          const requestedRole = (parsed.role || "student")
+            .toString()
+            .toLowerCase();
+          if (["student", "hr"].includes(requestedRole)) role = requestedRole;
+        }
+      } catch (_) {}
+
       user = new User({
         username: email.split("@")[0],
         email,
         googleId,
         provider: "google",
+        role,
         profile: {
           full_name: name || "",
           avatar: picture || "",
