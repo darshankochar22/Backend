@@ -23,10 +23,7 @@ const validateJob = [
     .optional()
     .isIn(["Entry", "Mid", "Senior", "Lead"])
     .withMessage("Experience must be Entry, Mid, Senior, or Lead"),
-  body("skills")
-    .optional()
-    .isArray()
-    .withMessage("Skills must be an array"),
+  body("skills").optional().isArray().withMessage("Skills must be an array"),
   body("skills.*")
     .optional()
     .trim()
@@ -47,15 +44,11 @@ const validateJob = [
   body("jobType")
     .optional()
     .isIn(["Full-time", "Part-time", "Contract", "Internship"])
-    .withMessage("Job type must be Full-time, Part-time, Contract, or Internship"),
-  body("remote")
-    .optional()
-    .isBoolean()
-    .withMessage("Remote must be a boolean"),
-  body("tags")
-    .optional()
-    .isArray()
-    .withMessage("Tags must be an array"),
+    .withMessage(
+      "Job type must be Full-time, Part-time, Contract, or Internship"
+    ),
+  body("remote").optional().isBoolean().withMessage("Remote must be a boolean"),
+  body("tags").optional().isArray().withMessage("Tags must be an array"),
   body("tags.*")
     .optional()
     .trim()
@@ -94,13 +87,13 @@ router.get("/", optionalAuth, async (req, res) => {
       page = 1,
       limit = 20,
       sortBy = "createdAt",
-      sortOrder = "desc"
+      sortOrder = "desc",
     } = req.query;
 
     // Build filter object
     const filter = {
       status: "active",
-      isArchived: false
+      isArchived: false,
     };
 
     // Add search filter
@@ -156,7 +149,7 @@ router.get("/", optionalAuth, async (req, res) => {
     const total = await Job.countDocuments(filter);
 
     // Format response
-    const formattedJobs = jobs.map(job => ({
+    const formattedJobs = jobs.map((job) => ({
       id: job._id,
       title: job.title,
       company: job.company,
@@ -168,13 +161,13 @@ router.get("/", optionalAuth, async (req, res) => {
       jobType: job.jobType,
       remote: job.remote,
       status: job.status,
-      uploadedAt: job.createdAt.toISOString().split('T')[0],
+      uploadedAt: job.createdAt.toISOString().split("T")[0],
       postedBy: job.postedBy,
       tags: job.tags || [],
       benefits: job.benefits || [],
       requirements: job.requirements || [],
       views: job.views,
-      applicationDeadline: job.applicationDeadline
+      applicationDeadline: job.applicationDeadline,
     }));
 
     res.json({
@@ -183,8 +176,8 @@ router.get("/", optionalAuth, async (req, res) => {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (error) {
     console.error("Get jobs error:", error);
@@ -221,14 +214,14 @@ router.get("/:id", optionalAuth, async (req, res) => {
       jobType: job.jobType,
       remote: job.remote,
       status: job.status,
-      uploadedAt: job.createdAt.toISOString().split('T')[0],
+      uploadedAt: job.createdAt.toISOString().split("T")[0],
       postedBy: job.postedBy,
       tags: job.tags || [],
       benefits: job.benefits || [],
       requirements: job.requirements || [],
       views: job.views,
       applicationDeadline: job.applicationDeadline,
-      applications: job.applications
+      applications: job.applications,
     };
 
     res.json(formattedJob);
@@ -252,7 +245,7 @@ router.post("/", validateJob, authenticateToken, async (req, res) => {
 
     const jobData = {
       ...req.body,
-      postedBy: req.user._id
+      postedBy: req.user._id,
     };
 
     const job = new Job(jobData);
@@ -271,13 +264,13 @@ router.post("/", validateJob, authenticateToken, async (req, res) => {
       jobType: job.jobType,
       remote: job.remote,
       status: job.status,
-      uploadedAt: job.createdAt.toISOString().split('T')[0],
+      uploadedAt: job.createdAt.toISOString().split("T")[0],
       postedBy: job.postedBy,
       tags: job.tags || [],
       benefits: job.benefits || [],
       requirements: job.requirements || [],
       views: job.views,
-      applicationDeadline: job.applicationDeadline
+      applicationDeadline: job.applicationDeadline,
     };
 
     res.status(201).json(formattedJob);
@@ -306,14 +299,15 @@ router.put("/:id", validateJob, authenticateToken, async (req, res) => {
 
     // Check if user owns the job
     if (job.postedBy.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: "Not authorized to update this job" });
+      return res
+        .status(403)
+        .json({ error: "Not authorized to update this job" });
     }
 
-    const updatedJob = await Job.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    ).populate("postedBy", "username email profile.full_name");
+    const updatedJob = await Job.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    }).populate("postedBy", "username email profile.full_name");
 
     const formattedJob = {
       id: updatedJob._id,
@@ -327,13 +321,13 @@ router.put("/:id", validateJob, authenticateToken, async (req, res) => {
       jobType: updatedJob.jobType,
       remote: updatedJob.remote,
       status: updatedJob.status,
-      uploadedAt: updatedJob.createdAt.toISOString().split('T')[0],
+      uploadedAt: updatedJob.createdAt.toISOString().split("T")[0],
       postedBy: updatedJob.postedBy,
       tags: updatedJob.tags || [],
       benefits: updatedJob.benefits || [],
       requirements: updatedJob.requirements || [],
       views: updatedJob.views,
-      applicationDeadline: updatedJob.applicationDeadline
+      applicationDeadline: updatedJob.applicationDeadline,
     };
 
     res.json(formattedJob);
@@ -353,7 +347,9 @@ router.delete("/:id", authenticateToken, async (req, res) => {
 
     // Check if user owns the job
     if (job.postedBy.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: "Not authorized to delete this job" });
+      return res
+        .status(403)
+        .json({ error: "Not authorized to delete this job" });
     }
 
     // Soft delete by archiving
@@ -380,11 +376,13 @@ router.post("/:id/apply", authenticateToken, async (req, res) => {
 
     // Check if user already applied
     const existingApplication = job.applications.find(
-      app => app.user.toString() === req.user._id.toString()
+      (app) => app.user.toString() === req.user._id.toString()
     );
 
     if (existingApplication) {
-      return res.status(400).json({ error: "You have already applied to this job" });
+      return res
+        .status(400)
+        .json({ error: "You have already applied to this job" });
     }
 
     // Add application
@@ -392,7 +390,7 @@ router.post("/:id/apply", authenticateToken, async (req, res) => {
       user: req.user._id,
       coverLetter: coverLetter || "",
       appliedAt: new Date(),
-      status: "pending"
+      status: "pending",
     });
 
     await job.save();
@@ -413,7 +411,7 @@ router.get("/my/jobs", authenticateToken, async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    const formattedJobs = jobs.map(job => ({
+    const formattedJobs = jobs.map((job) => ({
       id: job._id,
       title: job.title,
       company: job.company,
@@ -425,14 +423,14 @@ router.get("/my/jobs", authenticateToken, async (req, res) => {
       jobType: job.jobType,
       remote: job.remote,
       status: job.status,
-      uploadedAt: job.createdAt.toISOString().split('T')[0],
+      uploadedAt: job.createdAt.toISOString().split("T")[0],
       postedBy: job.postedBy,
       tags: job.tags || [],
       benefits: job.benefits || [],
       requirements: job.requirements || [],
       views: job.views,
       applicationDeadline: job.applicationDeadline,
-      applications: job.applications
+      applications: job.applications,
     }));
 
     res.json({ jobs: formattedJobs });
@@ -447,16 +445,16 @@ router.get("/my/applications", authenticateToken, async (req, res) => {
   try {
     const jobs = await Job.find({
       "applications.user": req.user._id,
-      isArchived: false
+      isArchived: false,
     })
       .populate("postedBy", "username email profile.full_name")
       .sort({ "applications.appliedAt": -1 })
       .lean();
 
     const applications = [];
-    jobs.forEach(job => {
+    jobs.forEach((job) => {
       const application = job.applications.find(
-        app => app.user.toString() === req.user._id.toString()
+        (app) => app.user.toString() === req.user._id.toString()
       );
       if (application) {
         applications.push({
@@ -467,11 +465,11 @@ router.get("/my/applications", authenticateToken, async (req, res) => {
             company: job.company,
             location: job.location,
             experience: job.experience,
-            postedBy: job.postedBy
+            postedBy: job.postedBy,
           },
           status: application.status,
           appliedAt: application.appliedAt,
-          coverLetter: application.coverLetter
+          coverLetter: application.coverLetter,
         });
       }
     });
