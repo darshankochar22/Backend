@@ -45,7 +45,7 @@ jspm_packages/
 
 # dotenv environment variables file
 .env
-
+.gitignore
 # IDE files
 .vscode/
 .idea/
