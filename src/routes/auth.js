@@ -425,8 +425,13 @@ router.get("/google/callback", async (req, res) => {
       try {
         if (state) {
           const parsed = JSON.parse(state);
-          const requestedRole = (parsed.role || "student").toString().toLowerCase();
-          if (["student", "hr"].includes(requestedRole) && user.role !== requestedRole) {
+          const requestedRole = (parsed.role || "student")
+            .toString()
+            .toLowerCase();
+          if (
+            ["student", "hr"].includes(requestedRole) &&
+            user.role !== requestedRole
+          ) {
             user.role = requestedRole;
           }
         }

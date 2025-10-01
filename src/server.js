@@ -128,7 +128,15 @@ app.use("*", (req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
-// Start server
+// Ensure DB is connected in serverless environments too
+app.use(async (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    await connectDB().catch(next);
+  }
+  next();
+});
+
+// Start server only when not running on Vercel serverless
 const startServer = async () => {
   await connectDB();
   app.listen(PORT, () => {
@@ -137,6 +145,8 @@ const startServer = async () => {
   });
 };
 
-startServer().catch(console.error);
+if (!process.env.VERCEL) {
+  startServer().catch(console.error);
+}
 
 export default app;
