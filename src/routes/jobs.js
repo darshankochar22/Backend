@@ -195,7 +195,10 @@ router.get(
   async (req, res) => {
     try {
       const job = await Job.findById(req.params.id)
-        .populate("applications.user", "username email profile.full_name role")
+        .populate(
+          "applications.user",
+          "username email profile.full_name role profile.resume.filename profile.resume.content_type profile.resume.file_size profile.resume.uploaded_at"
+        )
         .lean();
 
       if (!job || job.isArchived) {
@@ -203,7 +206,9 @@ router.get(
       }
 
       if (job.postedBy.toString() !== req.user._id.toString()) {
-        return res.status(403).json({ error: "Not authorized to view applicants" });
+        return res
+          .status(403)
+          .json({ error: "Not authorized to view applicants" });
       }
 
       const applicants = (job.applications || []).map((app) => ({
@@ -212,6 +217,16 @@ router.get(
         status: app.status,
         appliedAt: app.appliedAt,
         coverLetter: app.coverLetter,
+        resume:
+          app.user && app.user.profile && app.user.profile.resume
+            ? {
+                filename: app.user.profile.resume.filename,
+                content_type: app.user.profile.resume.content_type,
+                file_size: app.user.profile.resume.file_size,
+                uploaded_at: app.user.profile.resume.uploaded_at,
+                has_file: !!app.user.profile.resume.filename,
+              }
+            : { has_file: false },
       }));
 
       res.json({ applicants });
@@ -270,7 +285,10 @@ router.get("/:id", optionalAuth, async (req, res) => {
 
     if (isOwnerHr) {
       const fullJob = await Job.findById(req.params.id)
-        .populate("applications.user", "username email profile.full_name")
+        .populate(
+          "applications.user",
+          "username email profile.full_name profile.resume.filename profile.resume.content_type profile.resume.file_size profile.resume.uploaded_at"
+        )
         .lean();
       formattedJob.applications = (fullJob.applications || []).map((app) => ({
         id: app._id,
@@ -278,6 +296,16 @@ router.get("/:id", optionalAuth, async (req, res) => {
         status: app.status,
         appliedAt: app.appliedAt,
         coverLetter: app.coverLetter,
+        resume:
+          app.user && app.user.profile && app.user.profile.resume
+            ? {
+                filename: app.user.profile.resume.filename,
+                content_type: app.user.profile.resume.content_type,
+                file_size: app.user.profile.resume.file_size,
+                uploaded_at: app.user.profile.resume.uploaded_at,
+                has_file: !!app.user.profile.resume.filename,
+              }
+            : { has_file: false },
       }));
     }
 
@@ -295,51 +323,51 @@ router.post(
   authenticateToken,
   authorizeRoles("hr"),
   async (req, res) => {
-  try {
-    // Check for validation errors
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: "Validation failed",
-        details: errors.array(),
-      });
+    try {
+      // Check for validation errors
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: "Validation failed",
+          details: errors.array(),
+        });
+      }
+
+      const jobData = {
+        ...req.body,
+        postedBy: req.user._id,
+      };
+
+      const job = new Job(jobData);
+      await job.save();
+      await job.populate("postedBy", "username email profile.full_name");
+
+      const formattedJob = {
+        id: job._id,
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        experience: job.experience,
+        skills: job.skills || [],
+        description: job.description,
+        salary: job.salary,
+        jobType: job.jobType,
+        remote: job.remote,
+        status: job.status,
+        uploadedAt: job.createdAt.toISOString().split("T")[0],
+        postedBy: job.postedBy,
+        tags: job.tags || [],
+        benefits: job.benefits || [],
+        requirements: job.requirements || [],
+        views: job.views,
+        applicationDeadline: job.applicationDeadline,
+      };
+
+      res.status(201).json(formattedJob);
+    } catch (error) {
+      console.error("Create job error:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    const jobData = {
-      ...req.body,
-      postedBy: req.user._id,
-    };
-
-    const job = new Job(jobData);
-    await job.save();
-    await job.populate("postedBy", "username email profile.full_name");
-
-    const formattedJob = {
-      id: job._id,
-      title: job.title,
-      company: job.company,
-      location: job.location,
-      experience: job.experience,
-      skills: job.skills || [],
-      description: job.description,
-      salary: job.salary,
-      jobType: job.jobType,
-      remote: job.remote,
-      status: job.status,
-      uploadedAt: job.createdAt.toISOString().split("T")[0],
-      postedBy: job.postedBy,
-      tags: job.tags || [],
-      benefits: job.benefits || [],
-      requirements: job.requirements || [],
-      views: job.views,
-      applicationDeadline: job.applicationDeadline,
-    };
-
-    res.status(201).json(formattedJob);
-  } catch (error) {
-    console.error("Create job error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
   }
 );
 
@@ -350,59 +378,59 @@ router.put(
   authenticateToken,
   authorizeRoles("hr"),
   async (req, res) => {
-  try {
-    // Check for validation errors
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: "Validation failed",
-        details: errors.array(),
-      });
+    try {
+      // Check for validation errors
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: "Validation failed",
+          details: errors.array(),
+        });
+      }
+
+      const job = await Job.findById(req.params.id);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      // Check if user owns the job
+      if (job.postedBy.toString() !== req.user._id.toString()) {
+        return res
+          .status(403)
+          .json({ error: "Not authorized to update this job" });
+      }
+
+      const updatedJob = await Job.findByIdAndUpdate(req.params.id, req.body, {
+        new: true,
+        runValidators: true,
+      }).populate("postedBy", "username email profile.full_name");
+
+      const formattedJob = {
+        id: updatedJob._id,
+        title: updatedJob.title,
+        company: updatedJob.company,
+        location: updatedJob.location,
+        experience: updatedJob.experience,
+        skills: updatedJob.skills || [],
+        description: updatedJob.description,
+        salary: updatedJob.salary,
+        jobType: updatedJob.jobType,
+        remote: updatedJob.remote,
+        status: updatedJob.status,
+        uploadedAt: updatedJob.createdAt.toISOString().split("T")[0],
+        postedBy: updatedJob.postedBy,
+        tags: updatedJob.tags || [],
+        benefits: updatedJob.benefits || [],
+        requirements: updatedJob.requirements || [],
+        views: updatedJob.views,
+        applicationDeadline: updatedJob.applicationDeadline,
+      };
+
+      res.json(formattedJob);
+    } catch (error) {
+      console.error("Update job error:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    const job = await Job.findById(req.params.id);
-    if (!job) {
-      return res.status(404).json({ error: "Job not found" });
-    }
-
-    // Check if user owns the job
-    if (job.postedBy.toString() !== req.user._id.toString()) {
-      return res
-        .status(403)
-        .json({ error: "Not authorized to update this job" });
-    }
-
-    const updatedJob = await Job.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    }).populate("postedBy", "username email profile.full_name");
-
-    const formattedJob = {
-      id: updatedJob._id,
-      title: updatedJob.title,
-      company: updatedJob.company,
-      location: updatedJob.location,
-      experience: updatedJob.experience,
-      skills: updatedJob.skills || [],
-      description: updatedJob.description,
-      salary: updatedJob.salary,
-      jobType: updatedJob.jobType,
-      remote: updatedJob.remote,
-      status: updatedJob.status,
-      uploadedAt: updatedJob.createdAt.toISOString().split("T")[0],
-      postedBy: updatedJob.postedBy,
-      tags: updatedJob.tags || [],
-      benefits: updatedJob.benefits || [],
-      requirements: updatedJob.requirements || [],
-      views: updatedJob.views,
-      applicationDeadline: updatedJob.applicationDeadline,
-    };
-
-    res.json(formattedJob);
-  } catch (error) {
-    console.error("Update job error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
   }
 );
 
@@ -412,29 +440,29 @@ router.delete(
   authenticateToken,
   authorizeRoles("hr"),
   async (req, res) => {
-  try {
-    const job = await Job.findById(req.params.id);
-    if (!job) {
-      return res.status(404).json({ error: "Job not found" });
+    try {
+      const job = await Job.findById(req.params.id);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      // Check if user owns the job
+      if (job.postedBy.toString() !== req.user._id.toString()) {
+        return res
+          .status(403)
+          .json({ error: "Not authorized to delete this job" });
+      }
+
+      // Soft delete by archiving
+      job.isArchived = true;
+      job.status = "closed";
+      await job.save();
+
+      res.json({ message: "Job deleted successfully" });
+    } catch (error) {
+      console.error("Delete job error:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    // Check if user owns the job
-    if (job.postedBy.toString() !== req.user._id.toString()) {
-      return res
-        .status(403)
-        .json({ error: "Not authorized to delete this job" });
-    }
-
-    // Soft delete by archiving
-    job.isArchived = true;
-    job.status = "closed";
-    await job.save();
-
-    res.json({ message: "Job deleted successfully" });
-  } catch (error) {
-    console.error("Delete job error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
   }
 );
 
@@ -444,41 +472,46 @@ router.post(
   authenticateToken,
   authorizeRoles("student"),
   async (req, res) => {
-  try {
-    const { coverLetter } = req.body;
+    try {
+      const { coverLetter } = req.body;
 
-    const job = await Job.findById(req.params.id);
-    if (!job || job.isArchived || job.status !== "active") {
-      return res.status(404).json({ error: "Job not found or not available" });
+      const job = await Job.findById(req.params.id);
+      if (!job || job.isArchived || job.status !== "active") {
+        return res
+          .status(404)
+          .json({ error: "Job not found or not available" });
+      }
+
+      // Check if user already applied
+      const existingApplication = job.applications.find(
+        (app) => app.user.toString() === req.user._id.toString()
+      );
+
+      if (existingApplication) {
+        return res
+          .status(400)
+          .json({ error: "You have already applied to this job" });
+      }
+
+      // Add application
+      job.applications.push({
+        user: req.user._id,
+        coverLetter: coverLetter || "",
+        appliedAt: new Date(),
+        status: "pending",
+      });
+
+      await job.save();
+      await job.populate(
+        "applications.user",
+        "username email profile.full_name"
+      );
+
+      res.json({ message: "Application submitted successfully" });
+    } catch (error) {
+      console.error("Apply to job error:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    // Check if user already applied
-    const existingApplication = job.applications.find(
-      (app) => app.user.toString() === req.user._id.toString()
-    );
-
-    if (existingApplication) {
-      return res
-        .status(400)
-        .json({ error: "You have already applied to this job" });
-    }
-
-    // Add application
-    job.applications.push({
-      user: req.user._id,
-      coverLetter: coverLetter || "",
-      appliedAt: new Date(),
-      status: "pending",
-    });
-
-    await job.save();
-    await job.populate("applications.user", "username email profile.full_name");
-
-    res.json({ message: "Application submitted successfully" });
-  } catch (error) {
-    console.error("Apply to job error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
   }
 );
 
@@ -488,39 +521,39 @@ router.get(
   authenticateToken,
   authorizeRoles("hr"),
   async (req, res) => {
-  try {
-    const jobs = await Job.find({ postedBy: req.user._id, isArchived: false })
-      .populate("postedBy", "username email profile.full_name")
-      .sort({ createdAt: -1 })
-      .lean();
+    try {
+      const jobs = await Job.find({ postedBy: req.user._id, isArchived: false })
+        .populate("postedBy", "username email profile.full_name")
+        .sort({ createdAt: -1 })
+        .lean();
 
-    const formattedJobs = jobs.map((job) => ({
-      id: job._id,
-      title: job.title,
-      company: job.company,
-      location: job.location,
-      experience: job.experience,
-      skills: job.skills || [],
-      description: job.description,
-      salary: job.salary,
-      jobType: job.jobType,
-      remote: job.remote,
-      status: job.status,
-      uploadedAt: job.createdAt.toISOString().split("T")[0],
-      postedBy: job.postedBy,
-      tags: job.tags || [],
-      benefits: job.benefits || [],
-      requirements: job.requirements || [],
-      views: job.views,
-      applicationDeadline: job.applicationDeadline,
-      applications: job.applications,
-    }));
+      const formattedJobs = jobs.map((job) => ({
+        id: job._id,
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        experience: job.experience,
+        skills: job.skills || [],
+        description: job.description,
+        salary: job.salary,
+        jobType: job.jobType,
+        remote: job.remote,
+        status: job.status,
+        uploadedAt: job.createdAt.toISOString().split("T")[0],
+        postedBy: job.postedBy,
+        tags: job.tags || [],
+        benefits: job.benefits || [],
+        requirements: job.requirements || [],
+        views: job.views,
+        applicationDeadline: job.applicationDeadline,
+        applications: job.applications,
+      }));
 
-    res.json({ jobs: formattedJobs });
-  } catch (error) {
-    console.error("Get my jobs error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
+      res.json({ jobs: formattedJobs });
+    } catch (error) {
+      console.error("Get my jobs error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   }
 );
 
@@ -530,44 +563,90 @@ router.get(
   authenticateToken,
   authorizeRoles("student"),
   async (req, res) => {
-  try {
-    const jobs = await Job.find({
-      "applications.user": req.user._id,
-      isArchived: false,
-    })
-      .populate("postedBy", "username email profile.full_name")
-      .sort({ "applications.appliedAt": -1 })
-      .lean();
+    try {
+      const jobs = await Job.find({
+        "applications.user": req.user._id,
+        isArchived: false,
+      })
+        .populate("postedBy", "username email profile.full_name")
+        .sort({ "applications.appliedAt": -1 })
+        .lean();
 
-    const applications = [];
-    jobs.forEach((job) => {
-      const application = job.applications.find(
-        (app) => app.user.toString() === req.user._id.toString()
-      );
-      if (application) {
-        applications.push({
-          id: application._id,
-          job: {
-            id: job._id,
-            title: job.title,
-            company: job.company,
-            location: job.location,
-            experience: job.experience,
-            postedBy: job.postedBy,
-          },
-          status: application.status,
-          appliedAt: application.appliedAt,
-          coverLetter: application.coverLetter,
-        });
-      }
-    });
+      const applications = [];
+      jobs.forEach((job) => {
+        const application = job.applications.find(
+          (app) => app.user.toString() === req.user._id.toString()
+        );
+        if (application) {
+          applications.push({
+            id: application._id,
+            job: {
+              id: job._id,
+              title: job.title,
+              company: job.company,
+              location: job.location,
+              experience: job.experience,
+              postedBy: job.postedBy,
+            },
+            status: application.status,
+            appliedAt: application.appliedAt,
+            coverLetter: application.coverLetter,
+          });
+        }
+      });
 
-    res.json({ applications });
-  } catch (error) {
-    console.error("Get my applications error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
+      res.json({ applications });
+    } catch (error) {
+      console.error("Get my applications error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   }
 );
 
 export default router;
+
+// HR: download applicant resume for a specific job (only if HR owns the job)
+router.get(
+  "/:id/applicants/:appId/resume",
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
+    try {
+      const { id, appId } = req.params;
+      const job = await Job.findById(id).populate(
+        "applications.user",
+        "profile.resume filename"
+      );
+      if (!job || job.isArchived) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+      if (job.postedBy.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      const application = job.applications.id(appId);
+      if (!application || !application.user) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+      const applicant = await User.findById(application.user).select(
+        "profile.resume"
+      );
+      if (!applicant || !applicant.profile || !applicant.profile.resume) {
+        return res.status(404).json({ error: "Resume not found" });
+      }
+      const resume = applicant.profile.resume;
+      if (!resume.file_data) {
+        return res.status(404).json({ error: "No resume file stored" });
+      }
+      const fileBuffer = Buffer.from(resume.file_data, "base64");
+      res.set({
+        "Content-Type": resume.content_type,
+        "Content-Disposition": `attachment; filename="${resume.filename}"`,
+        "Content-Length": fileBuffer.length,
+      });
+      return res.send(fileBuffer);
+    } catch (error) {
+      console.error("Download applicant resume error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
