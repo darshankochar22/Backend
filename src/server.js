@@ -48,7 +48,7 @@ app.use(
   })
 );
 // After your cors() middleware, add:
-app.options('*', cors());
+app.options("*", cors());
 // Body parsing middleware
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
@@ -118,7 +118,7 @@ app.get("/", (req, res) => {
   res.json({
     status: "ok",
     message: "Hexagon Node.js Backend is running",
-    version: "1.0.0",
+    version: "1.0.1",
     timestamp: new Date().toISOString(),
   });
 });
