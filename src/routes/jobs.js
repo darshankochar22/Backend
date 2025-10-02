@@ -1,5 +1,8 @@
 import express from "express";
 import jwt from "jsonwebtoken";
+import fetch from "node-fetch";
+import { GoogleGenAI } from "@google/genai";
+import { tavily } from "@tavily/core";
 import { body, query, validationResult } from "express-validator";
 import { authenticateToken, optionalAuth } from "../middleware/auth.js";
 import { authorizeRoles } from "../middleware/auth.js";
@@ -226,6 +229,7 @@ router.get(
         status: app.status,
         appliedAt: app.appliedAt,
         coverLetter: app.coverLetter,
+        analysis: app.analysis || null, // Include analysis data
         resume: (() => {
           const r =
             (app.user &&
@@ -258,6 +262,257 @@ router.get(
   }
 );
 
+// HR: analyze all applicants' resumes with Gemini and store summaries
+router.post(
+  "/:id/analyze-resumes",
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const job = await Job.findById(id)
+        .populate(
+          "applications.user",
+          "_id role profile.full_name profile.resume.public_token studentProfile.resume.public_token"
+        )
+        .lean();
+
+      if (!job || job.isArchived) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+      if (job.postedBy.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+
+      const baseUrl = (
+        process.env.BACKEND_BASE_URL || `${req.protocol}://${req.get("host")}`
+      ).replace(/\/$/, "");
+      const modelName = "gemini-2.5-flash";
+      const apiKey = process.env.GOOGLE_GENAI_API_KEY;
+      const tavilyApiKey = process.env.TAVILY_API_KEY;
+
+      if (!apiKey) {
+        return res
+          .status(500)
+          .json({ error: "GOOGLE_GENAI_API_KEY is not set" });
+      }
+      if (!tavilyApiKey) {
+        return res.status(500).json({ error: "TAVILY_API_KEY is not set" });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const tavilyClient = tavily({ apiKey: tavilyApiKey });
+
+      // Work on a mutable Job doc to save analyses
+      const jobDoc = await Job.findById(id);
+
+      // Iterate applications sequentially
+      for (const app of jobDoc.applications) {
+        try {
+          // Build public resume URL
+          const user = job.applications.find(
+            (a) => String(a._id) === String(app._id)
+          )?.user;
+          const userId = user && user._id ? user._id : user;
+          const publicToken =
+            (user &&
+              user.studentProfile &&
+              user.studentProfile.resume &&
+              user.studentProfile.resume.public_token) ||
+            (user &&
+              user.profile &&
+              user.profile.resume &&
+              user.profile.resume.public_token) ||
+            undefined;
+
+          if (!publicToken || !userId) {
+            app.analysis = {
+              summary: "No public resume token found",
+              analyzedAt: new Date(),
+              model: modelName,
+            };
+            continue;
+          }
+
+          const resumeUrl = `${baseUrl}/users/public/resume/${userId}/${publicToken}`;
+
+          // Fetch PDF as ArrayBuffer
+          const pdfResp = await fetch(resumeUrl);
+          if (!pdfResp.ok) {
+            app.analysis = {
+              summary: `Failed to fetch resume (${pdfResp.status})`,
+              analyzedAt: new Date(),
+              model: modelName,
+            };
+            continue;
+          }
+          const pdfArrayBuffer = await pdfResp.arrayBuffer();
+          const pdfBytes = Buffer.from(pdfArrayBuffer);
+
+          // For now, skip URL extraction and just analyze the resume PDF
+          let linkContent = "";
+          const uniqueUrls = [];
+
+          if (uniqueUrls.length > 0) {
+            try {
+              // Use Tavily to extract content from URLs
+              const extractPromises = uniqueUrls.map((url) =>
+                tavilyClient.extract([url]).catch((err) => {
+                  console.warn(`Failed to extract ${url}:`, err.message);
+                  return { content: `Failed to extract content from ${url}` };
+                })
+              );
+
+              const extractResults = await Promise.all(extractPromises);
+              linkContent = extractResults
+                .map((result, index) => {
+                  const url = uniqueUrls[index];
+                  const content =
+                    result.content ||
+                    result.text ||
+                    `No content extracted from ${url}`;
+                  return `\n\n--- Content from ${url} ---\n${content.substring(
+                    0,
+                    2000
+                  )}...`; // Limit content length
+                })
+                .join("\n");
+            } catch (tavilyErr) {
+              console.warn("Tavily extraction failed:", tavilyErr.message);
+              linkContent = `\n\nNote: Could not extract content from linked URLs: ${uniqueUrls.join(
+                ", "
+              )}`;
+            }
+          }
+
+          // Build enhanced prompt with link content
+          const analysisPrompt = `You are an expert recruiter. Analyze the attached candidate resume thoroughly. Extract and evaluate:
+- Key skills and proficiency
+- Employment history with impact
+- Education and certifications
+- Projects with links and outcomes (analyze the linked content provided below)
+- Strengths, gaps, and red flags
+- Seniority assessment and role fit
+- 5 tailored interview questions
+
+Return a detailed, readable summary in 1-2 paragraphs.${linkContent}`;
+
+          // Provide the PDF as bytes to Gemini File API-style parts
+          const contents = [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: analysisPrompt,
+                },
+                {
+                  inlineData: {
+                    data: pdfBytes.toString("base64"),
+                    mimeType: "application/pdf",
+                  },
+                },
+              ],
+            },
+          ];
+
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents,
+          });
+
+          // Handle Gemini API response properly
+          let text = "";
+          try {
+            if (response && typeof response.text === "function") {
+              text = response.text();
+            } else if (response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+              text = response.candidates[0].content.parts[0].text;
+            } else if (response?.response?.text) {
+              text = response.response.text();
+            } else {
+              text = "Unable to extract text from response";
+            }
+          } catch (textErr) {
+            console.error("Error extracting text from response:", textErr);
+            text = "Error processing response";
+          }
+
+          // Generate interview questions based on the analysis
+          let interviewQuestions = [];
+          try {
+            const questionsResponse = await ai.models.generateContent({
+              model: modelName,
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    {
+                      text: `Based on this resume analysis, generate exactly 5 specific interview questions that would be most relevant for this candidate. Make them practical and tailored to their experience level and skills mentioned in the analysis.\n\nAnalysis: ${text}\n\nReturn only the 5 questions, one per line, without numbering or bullet points.`,
+                    },
+                  ],
+                },
+              ],
+            });
+
+            let questionsText = "";
+            if (
+              questionsResponse &&
+              typeof questionsResponse.text === "function"
+            ) {
+              questionsText = questionsResponse.text();
+            } else if (
+              questionsResponse?.candidates?.[0]?.content?.parts?.[0]?.text
+            ) {
+              questionsText =
+                questionsResponse.candidates[0].content.parts[0].text;
+            } else if (questionsResponse?.response?.text) {
+              questionsText = questionsResponse.response.text();
+            }
+
+            // Parse questions from the response
+            interviewQuestions = questionsText
+              .split("\n")
+              .map((q) => q.trim())
+              .filter((q) => q.length > 0)
+              .slice(0, 5); // Ensure exactly 5 questions
+          } catch (questionsErr) {
+            console.error(
+              "Error generating interview questions:",
+              questionsErr
+            );
+            interviewQuestions = [
+              "Tell me about your relevant experience for this role.",
+              "What are your key strengths that would benefit this position?",
+              "How do you approach problem-solving in your work?",
+              "What challenges have you faced in your previous roles?",
+              "Why are you interested in this position?",
+            ];
+          }
+
+          app.analysis = {
+            summary: text || "No analysis generated",
+            analyzedAt: new Date(),
+            model: modelName,
+            urlsAnalyzed: uniqueUrls,
+            interviewQuestions: interviewQuestions,
+          };
+        } catch (innerErr) {
+          app.analysis = {
+            summary: `Analysis failed: ${innerErr?.message || innerErr}`,
+            analyzedAt: new Date(),
+            model: modelName,
+          };
+        }
+      }
+
+      await jobDoc.save();
+      return res.json({ message: "Analysis completed" });
+    } catch (error) {
+      console.error("Analyze resumes error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
 // HR: get a signed, temporary URL to view resume without headers (for window.open)
 router.get(
   "/:id/applicants/:appId/resume-url",

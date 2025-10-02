@@ -99,6 +99,14 @@ const jobSchema = new mongoose.Schema(
           type: String,
           maxlength: 1000,
         },
+        // LLM analysis summary of the candidate resume
+        analysis: {
+          summary: { type: String, default: "" },
+          analyzedAt: { type: Date },
+          model: { type: String, default: "" },
+          urlsAnalyzed: [{ type: String }], // URLs that were crawled and analyzed
+          interviewQuestions: [{ type: String }], // AI-generated interview questions
+        },
       },
     ],
     tags: [
