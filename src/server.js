@@ -25,21 +25,14 @@ app.set("trust proxy", 1);
 // Security middleware
 app.use(helmet());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
-
-// CORS configuration
+// CORS must be BEFORE rate limiting so errors still include CORS headers
 app.use(
   cors({
     origin: [
       "http://localhost:5173",
       "http://localhost:3000",
       "https://hexagon-eran.vercel.app",
-      "https://hexagon-steel.vercel.app", // Your actual deployed frontend
+      "https://hexagon-steel.vercel.app",
       "https://hexagon.vercel.app",
     ],
     credentials: true,
@@ -47,6 +40,16 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+app.options("*", cors());
+
+// Rate limiting (after CORS so 429 responses still have ACAO)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(limiter);
 // After your cors() middleware, add:
 app.options("*", cors());
 // Body parsing middleware

@@ -1,4 +1,5 @@
 import express from "express";
+import jwt from "jsonwebtoken";
 import { body, query, validationResult } from "express-validator";
 import { authenticateToken, optionalAuth } from "../middleware/auth.js";
 import { authorizeRoles } from "../middleware/auth.js";
@@ -202,7 +203,7 @@ router.get(
       const job = await Job.findById(req.params.id)
         .populate(
           "applications.user",
-          "username email profile.full_name role profile.resume.filename profile.resume.content_type profile.resume.file_size profile.resume.uploaded_at"
+          "_id username email role profile.full_name profile.resume.filename profile.resume.content_type profile.resume.file_size profile.resume.uploaded_at profile.resume.public_token studentProfile.resume.filename studentProfile.resume.content_type studentProfile.resume.file_size studentProfile.resume.uploaded_at studentProfile.resume.public_token"
         )
         .lean();
 
@@ -216,22 +217,37 @@ router.get(
           .json({ error: "Not authorized to view applicants" });
       }
 
+      const baseUrl = (
+        process.env.BACKEND_BASE_URL || `${req.protocol}://${req.get("host")}`
+      ).replace(/\/$/, "");
       const applicants = (job.applications || []).map((app) => ({
         id: app._id,
         user: app.user,
         status: app.status,
         appliedAt: app.appliedAt,
         coverLetter: app.coverLetter,
-        resume:
-          app.user && app.user.profile && app.user.profile.resume
+        resume: (() => {
+          const r =
+            (app.user &&
+              app.user.studentProfile &&
+              app.user.studentProfile.resume) ||
+            (app.user && app.user.profile && app.user.profile.resume);
+          const public_token = r && r.public_token ? r.public_token : undefined;
+          const public_url =
+            public_token && app.user && app.user._id
+              ? `${baseUrl}/users/public/resume/${app.user._id}/${public_token}`
+              : undefined;
+          return r
             ? {
-                filename: app.user.profile.resume.filename,
-                content_type: app.user.profile.resume.content_type,
-                file_size: app.user.profile.resume.file_size,
-                uploaded_at: app.user.profile.resume.uploaded_at,
-                has_file: !!app.user.profile.resume.filename,
+                filename: r.filename,
+                content_type: r.content_type,
+                file_size: r.file_size,
+                uploaded_at: r.uploaded_at,
+                has_file: !!r.filename,
+                public_url,
               }
-            : { has_file: false },
+            : { has_file: false };
+        })(),
       }));
 
       res.json({ applicants });
@@ -242,6 +258,110 @@ router.get(
   }
 );
 
+// HR: get a signed, temporary URL to view resume without headers (for window.open)
+router.get(
+  "/:id/applicants/:appId/resume-url",
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
+    try {
+      const { id, appId } = req.params;
+      const job = await Job.findById(id).select("postedBy isArchived");
+      if (!job || job.isArchived) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+      if (job.postedBy.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      const token = jwt.sign(
+        {
+          typ: "resume_view",
+          hr: req.user._id.toString(),
+          job: id,
+          app: appId,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: "60s" }
+      );
+      const base =
+        process.env.BACKEND_BASE_URL ||
+        `http://localhost:${process.env.PORT || 5003}`;
+      const url = `${base}/jobs/${id}/applicants/${appId}/resume/view?st=${encodeURIComponent(
+        token
+      )}`;
+      return res.json({ url, expires_in: 60 });
+    } catch (error) {
+      console.error("Generate resume URL error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+// Public (signed) viewer for resume
+router.get("/:id/applicants/:appId/resume/view", async (req, res) => {
+  try {
+    const { id, appId } = req.params;
+    const { st } = req.query;
+    if (!st || typeof st !== "string") {
+      return res.status(401).json({ error: "Missing token" });
+    }
+    let payload;
+    try {
+      payload = jwt.verify(st, process.env.JWT_SECRET);
+    } catch (e) {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+    if (
+      payload.typ !== "resume_view" ||
+      payload.job !== id ||
+      payload.app !== appId
+    ) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    const job = await Job.findById(id);
+    if (!job || job.isArchived) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+    const application = job.applications.id(appId);
+    if (!application || !application.user) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+    const applicant = await User.findById(application.user).select(
+      "role profile.resume studentProfile.resume"
+    );
+    if (!applicant || applicant.role !== "student") {
+      return res.status(404).json({ error: "Applicant not found" });
+    }
+    const resume =
+      application.resume ||
+      (applicant.studentProfile && applicant.studentProfile.resume) ||
+      applicant.profile?.resume ||
+      null;
+    if (!resume || !resume.file_data) {
+      return res.status(404).json({ error: "No resume file stored" });
+    }
+    const fileBuffer = Buffer.from(resume.file_data, "base64");
+    const lastModified = resume.uploaded_at
+      ? new Date(resume.uploaded_at)
+      : new Date();
+    const lastModifiedStr = lastModified.toUTCString();
+    const etag = `${fileBuffer.length}-${lastModified.getTime()}`;
+    res.set({
+      "Content-Type": resume.content_type,
+      "Content-Disposition": `inline; filename="${resume.filename}"`,
+      "Content-Length": fileBuffer.length,
+      "Cache-Control": "no-store, no-cache, must-revalidate, private",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Last-Modified": lastModifiedStr,
+      ETag: etag,
+    });
+    return res.send(fileBuffer);
+  } catch (error) {
+    console.error("Signed resume view error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 // Get a single job by ID
 router.get("/:id", optionalAuth, async (req, res) => {
   try {
@@ -498,21 +618,41 @@ router.post(
           .json({ error: "You have already applied to this job" });
       }
 
-      // Add application
+      // Resolve candidate resume (prefer studentProfile.resume, then legacy profile.resume)
+      const applicantForSnapshot = await User.findById(req.user._id).select(
+        "studentProfile.resume profile.resume"
+      );
+      const selectedResume =
+        (applicantForSnapshot.studentProfile &&
+          applicantForSnapshot.studentProfile.resume) ||
+        (applicantForSnapshot.profile && applicantForSnapshot.profile.resume) ||
+        null;
+
+      // Add application with embedded resume snapshot (if present)
       job.applications.push({
         user: req.user._id,
         coverLetter: coverLetter || "",
         appliedAt: new Date(),
         status: "pending",
+        ...(selectedResume
+          ? {
+              resume: {
+                filename: selectedResume.filename,
+                content_type: selectedResume.content_type,
+                file_size: selectedResume.file_size,
+                uploaded_at: selectedResume.uploaded_at,
+                file_data: selectedResume.file_data,
+              },
+            }
+          : {}),
       });
 
       await job.save();
-      await job.populate(
-        "applications.user",
-        "username email profile.full_name"
-      );
 
-      res.json({ message: "Application submitted successfully" });
+      res.json({
+        message: "Application submitted successfully",
+        resume_attached: !!selectedResume,
+      });
     } catch (error) {
       console.error("Apply to job error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -620,7 +760,7 @@ router.get(
       const { id, appId } = req.params;
       const job = await Job.findById(id).populate(
         "applications.user",
-        "profile.resume filename"
+        "profile.resume studentProfile.resume filename"
       );
       if (!job || job.isArchived) {
         return res.status(404).json({ error: "Job not found" });
@@ -632,28 +772,80 @@ router.get(
       if (!application || !application.user) {
         return res.status(404).json({ error: "Application not found" });
       }
+      // Prefer embedded snapshot on the application; fallback to latest from user
       const applicant = await User.findById(application.user).select(
-        "profile.resume role"
+        "role profile.resume studentProfile.resume"
       );
       if (applicant.role !== "student") {
         return res.status(400).json({ error: "Applicant is not a student" });
       }
-      if (!applicant || !applicant.profile || !applicant.profile.resume) {
-        return res.status(404).json({ error: "Resume not found" });
-      }
-      const resume = applicant.profile.resume;
-      if (!resume.file_data) {
+
+      const snapshot = application.resume || null;
+      const latest =
+        (applicant.studentProfile && applicant.studentProfile.resume) ||
+        applicant.profile?.resume ||
+        null;
+      const resume = snapshot || latest;
+
+      if (!resume || !resume.file_data) {
         return res.status(404).json({ error: "No resume file stored" });
       }
+
       const fileBuffer = Buffer.from(resume.file_data, "base64");
+
+      // Cache-safe, inline display
+      const lastModified = resume.uploaded_at
+        ? new Date(resume.uploaded_at)
+        : new Date();
+      const lastModifiedStr = lastModified.toUTCString();
+      const etag = `${fileBuffer.length}-${lastModified.getTime()}`;
+
       res.set({
         "Content-Type": resume.content_type,
-        "Content-Disposition": `attachment; filename="${resume.filename}"`,
+        "Content-Disposition": `inline; filename="${resume.filename}"`,
         "Content-Length": fileBuffer.length,
+        "Cache-Control": "no-store, no-cache, must-revalidate, private",
+        Pragma: "no-cache",
+        Expires: "0",
+        Vary: "Authorization",
+        "Last-Modified": lastModifiedStr,
+        ETag: etag,
       });
       return res.send(fileBuffer);
     } catch (error) {
       console.error("Download applicant resume error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+// HR: delete an application for a job they own
+router.delete(
+  "/:id/applicants/:appId",
+  authenticateToken,
+  authorizeRoles("hr"),
+  async (req, res) => {
+    try {
+      const { id, appId } = req.params;
+      const job = await Job.findById(id);
+      if (!job || job.isArchived) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+      if (job.postedBy.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      const application = job.applications.id(appId);
+      if (!application) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+
+      // Remove subdocument safely in Mongoose 7/8
+      job.applications.pull({ _id: appId });
+      await job.save();
+
+      return res.json({ message: "Application deleted" });
+    } catch (error) {
+      console.error("Delete application error:", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   }

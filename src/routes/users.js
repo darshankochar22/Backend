@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "crypto";
 import { body, validationResult } from "express-validator";
 import multer from "multer";
 import path from "path";
@@ -185,6 +186,8 @@ router.post(
         file_size: size,
         uploaded_at: new Date(),
         file_data: fileBase64,
+        // Public token for non-authenticated viewing
+        public_token: crypto.randomBytes(24).toString("hex"),
       };
 
       // Update user with resume (store under studentProfile.resume going forward)
@@ -215,6 +218,49 @@ router.post(
     }
   }
 );
+
+// Public resume viewer by token (no auth)
+router.get("/public/resume/:userId/:token", async (req, res) => {
+  try {
+    const { userId, token } = req.params;
+    const user = await User.findById(userId).select(
+      "studentProfile.resume profile.resume"
+    );
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const resume =
+      (user.studentProfile && user.studentProfile.resume) ||
+      user.profile?.resume;
+    if (!resume || !resume.file_data || !resume.public_token) {
+      return res.status(404).json({ error: "No resume found" });
+    }
+    if (token !== resume.public_token) {
+      return res.status(403).json({ error: "Invalid token" });
+    }
+
+    const fileBuffer = Buffer.from(resume.file_data, "base64");
+    const lastModified = resume.uploaded_at
+      ? new Date(resume.uploaded_at)
+      : new Date();
+    const lastModifiedStr = lastModified.toUTCString();
+    const etag = `${fileBuffer.length}-${lastModified.getTime()}`;
+
+    res.set({
+      "Content-Type": resume.content_type,
+      "Content-Disposition": `inline; filename="${resume.filename}"`,
+      "Content-Length": fileBuffer.length,
+      "Cache-Control": "no-store, no-cache, must-revalidate, private",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Last-Modified": lastModifiedStr,
+      ETag: etag,
+    });
+
+    res.send(fileBuffer);
+  } catch (error) {
+    console.error("Public resume view error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // Download resume
 router.get("/download-resume", authenticateToken, async (req, res) => {
