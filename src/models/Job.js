@@ -155,7 +155,7 @@ jobSchema.index({ createdAt: -1 });
 
 // Virtual for formatted creation date
 jobSchema.virtual("uploadedAt").get(function () {
-  return this.createdAt.toISOString().split("T")[0];
+  return this.createdAt ? this.createdAt.toISOString().split("T")[0] : null;
 });
 
 // Ensure virtual fields are serialized
